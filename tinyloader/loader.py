@@ -59,13 +59,13 @@ class SharedNDArray:
 @dataclasses.dataclass(frozen=True)
 class LoadRequestSharedBuffer:
     request: typing.Any
-    buffers: tuple[SharedMemory, ...] | None
+    buffers: tuple[SharedBuffer, ...] | None
 
 
-def share_ndarray(array: np.ndarray, buffer: SharedMemory) -> SharedNDArray:
-    if array.nbytes != buffer.size:
+def share_ndarray(array: np.ndarray, buffer: SharedBuffer) -> SharedNDArray:
+    if array.nbytes != buffer.actual_block_size:
         raise ValueError(
-            f"Expected data ndarray size {array.nbytes} should be equal to {buffer.size}"
+            f"Expected data ndarray size {array.nbytes} should be equal to {buffer.actual_block_size}"
         )
     shared_ndarray = np.ndarray(shape=array.shape, dtype=array.dtype, buffer=buffer.buf)
     shared_ndarray[:] = array[:]
@@ -83,18 +83,18 @@ class MemoryPool:
         self.actual_block_size = size
         self.block_size = max(self.actual_block_size, alignment_size)
         self.block_count = count
-        self.shared_memory = smm.SharedMemory(self.block_size * self.block_count)
-        self.queue = queue.Queue(count)
+        self._shared_memory = smm.SharedMemory(self.block_size * self.block_count)
+        self._queue = queue.Queue(count)
         for i in range(count):
-            self.queue.put(i)
+            self._queue.put(i)
 
     def pop(self) -> SharedBuffer:
-        index = self.queue.get()
+        index = self._queue.get()
         offset = index * self.block_size
         shared_buffer = SharedBuffer(
             index=index,
             view=slice(offset, offset + self.block_size),
-            buffer=self.shared_memory,
+            buffer=self._shared_memory,
             actual_block_size=self.actual_block_size,
         )
         logger.debug("Pop shared buffer %s", shared_buffer)
@@ -105,7 +105,7 @@ class MemoryPool:
             raise ValueError(
                 f"Push shared buffer with a wrong block size back to a wrong memory pool, expected {self.actual_block_size} but got {shared_buffer.actual_block_size}"
             )
-        self.queue.put(shared_buffer.index)
+        self._queue.put(shared_buffer.index)
         logger.debug("Pushed shared buffer %s", shared_buffer)
 
 
