@@ -34,24 +34,47 @@ class RandomLoader(Loader):
 
 
 def test_load():
-    loader = RandomLoader(data_size=(64, 64), label_size=(4,))
-    for x, y in load(loader, [1, 2, 3]):
-        print(x.numpy(), y.numpy())
+    data_size = (64, 64)
+    label_size = (4,)
+    n = 1000
+    loader = RandomLoader(data_size=data_size, label_size=label_size)
+    count = 0
+    for x, y in load(loader, range(n)):
+        assert x.numpy().shape == data_size
+        assert y.numpy().shape == label_size
+        count += 1
+    assert count == n
 
 
 def test_load_with_workers():
-    loader = RandomLoader(data_size=(64, 64), label_size=(4,))
-    with load_with_workers(loader, [1, 2, 3], 4) as generator:
+    data_size = (64, 64)
+    label_size = (4,)
+    num_worker = 4
+    n = 1000
+    loader = RandomLoader(data_size=data_size, label_size=label_size)
+    count = 0
+    with load_with_workers(loader, range(n), num_worker) as generator:
         for x, y in generator:
-            print(x.numpy(), y.numpy())
+            assert x.numpy().shape == data_size
+            assert y.numpy().shape == label_size
+            count += 1
+    assert count == n
 
 
 def test_share_memory_shim():
     multiprocessing.context.set_spawning_popen("spawn")
+    data_size = (9, 3, 512, 512)
+    label_size = (4,)
+    num_worker = 4
+    n = 1000
+    count = 0
     with SharedMemoryManager() as smm:
         loader = SharedMemoryShim(
-            RandomLoader(data_size=(64, 1024, 1024, 3), label_size=(4,)), smm=smm
+            RandomLoader(data_size=data_size, label_size=label_size), smm=smm
         )
-        with load_with_workers(loader, range(1000), 4) as generator:
+        with load_with_workers(loader, range(n), num_worker) as generator:
             for x, y in generator:
-                print(x.numpy(), y.numpy())
+                assert x.numpy().shape == data_size
+                assert y.numpy().shape == label_size
+                count += 1
+    assert count == n
