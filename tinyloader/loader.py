@@ -69,15 +69,14 @@ class SharedMemoryShim(Loader):
         self.loader = loader
         self._buf_sizes: tuple[int, ...] | None = None
         self._smm: SharedMemoryManager = smm
-        self._memory_pool: dict[int, collections.deque[SharedMemory]] = (
-            collections.defaultdict(collections.deque)
-        )
+        self._memory_pool: dict[int, collections.deque[SharedMemory]] = {}
 
     def _pop_buf(self, size: int) -> SharedMemory:
-        if self._memory_pool[size]:
-            shared_buffer = self._memory_pool[size].popleft()
+        dequeue = self._memory_pool[size]
+        try:
+            shared_buffer = dequeue.popleft()
             logger.debug("Pop shared buffer %s from pool", shared_buffer)
-        else:
+        except IndexError:
             shared_buffer = self._smm.SharedMemory(size)
             logger.debug("Created shared buffer %s", shared_buffer)
         return shared_buffer
@@ -115,6 +114,8 @@ class SharedMemoryShim(Loader):
     ) -> tuple[tinygrad.Tensor, ...]:
         if any(map(lambda item: isinstance(item, np.ndarray), response)):
             self._buf_sizes = tuple(map(lambda item: item.nbytes, response))
+            for item in response:
+                self._memory_pool[item.nbytes] = collections.deque()
             return self.loader.post_process(response)
         new_resp = []
         for shared in response:
