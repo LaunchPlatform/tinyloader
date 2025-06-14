@@ -2,8 +2,6 @@ import abc
 import collections
 import contextlib
 import dataclasses
-import functools
-import itertools
 import multiprocessing
 import typing
 from multiprocessing.managers import SharedMemoryManager
@@ -118,10 +116,13 @@ class SharedMemoryShim(Loader):
         return self.loader.post_process(tuple(new_resp))
 
     def __reduce__(self):
+        # avoid pickling SharedMemoryManager, only care about the underlying loader in `load` method anyway
         return self.__class__, (self.loader, None), None
 
 
-def load(loader: Loader, items: typing.Sequence[typing.Any]):
+def load(
+    loader: Loader, items: typing.Sequence[typing.Any]
+) -> typing.Generator[tuple[tinygrad.Tensor, ...], None, None]:
     yield from map(
         loader.post_process, map(loader.load, map(loader.make_request, items))
     )
@@ -132,11 +133,13 @@ def load_with_workers(
     loader: Loader,
     items: typing.Sequence[typing.Any],
     num_worker: int | None = None,
-) -> typing.Generator[typing.Any]:
+) -> typing.Generator[
+    typing.Generator[tuple[tinygrad.Tensor, ...], None, None], None, None
+]:
     with multiprocessing.Pool(num_worker) as pool:
         items_iter = iter(items)
 
-        def generate():
+        def generate() -> typing.Generator[tuple[tinygrad.Tensor, ...], None, None]:
             # Load first item without multiprocessing to get the buffer size in case the shared memory loader is
             # used
             yield from load(loader, [next(items_iter)])
