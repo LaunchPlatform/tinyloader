@@ -31,10 +31,22 @@ class Loader(abc.ABC):
 
 
 @dataclasses.dataclass(frozen=True)
+class SharedBuffer:
+    index: int
+    view: slice
+    buffer: SharedMemory
+    actual_block_size: int
+
+    @property
+    def buf(self) -> memoryview:
+        return self.buffer.buf[self.view]
+
+
+@dataclasses.dataclass(frozen=True)
 class SharedNDArray:
     shape: tuple[int, ...]
     dtype: np.typing.DTypeLike
-    buffer: SharedMemory
+    buffer: SharedBuffer
 
     def to_ndarray(self) -> np.typing.NDArray:
         return np.ndarray(
@@ -64,17 +76,52 @@ def share_ndarray(array: np.ndarray, buffer: SharedMemory) -> SharedNDArray:
     )
 
 
+class MemoryPool:
+    def __init__(
+        self, smm: SharedMemoryManager, size: int, count: int, alignment_size: int = 8
+    ):
+        self.actual_block_size = size
+        self.block_size = max(self.actual_block_size, alignment_size)
+        self.block_count = count
+        self.shared_memory = smm.SharedMemory(self.block_size * self.block_count)
+        self.queue = queue.Queue(count)
+        for i in range(count):
+            self.queue.put(i)
+
+    def pop(self) -> SharedBuffer:
+        index = self.queue.get()
+        offset = index * self.block_size
+        shared_buffer = SharedBuffer(
+            index=index,
+            view=slice(offset, offset + self.block_size),
+            buffer=self.shared_memory,
+            actual_block_size=self.actual_block_size,
+        )
+        logger.debug("Pop shared buffer %s", shared_buffer)
+        return shared_buffer
+
+    def push(self, shared_buffer: SharedBuffer):
+        if shared_buffer.actual_block_size != self.actual_block_size:
+            raise ValueError(
+                f"Push shared buffer with a wrong block size back to a wrong memory pool, expected {self.actual_block_size} but got {shared_buffer.actual_block_size}"
+            )
+        self.queue.put(shared_buffer.index)
+        logger.debug("Pushed shared buffer %s", shared_buffer)
+
+
 class SharedMemoryShim(Loader):
-    def __init__(self, loader: Loader, smm: SharedMemoryManager, memory_pool_size: int):
+    def __init__(
+        self, loader: Loader, smm: SharedMemoryManager, memory_pool_block_count: int
+    ):
         self.loader = loader
         self._buf_sizes: tuple[int, ...] | None = None
         self._smm: SharedMemoryManager = smm
-        self._memory_pool: dict[int, queue.Queue[SharedMemory]] = {}
-        self._memory_pool_size = memory_pool_size
+        self._memory_pools: dict[int, MemoryPool] = {}
+        self._memory_pool_block_count = memory_pool_block_count
 
-    def _pop_buf(self, size: int) -> SharedMemory:
-        queue = self._memory_pool[size]
-        shared_buffer = queue.get()
+    def _pop_buf(self, size: int) -> SharedBuffer:
+        pool = self._memory_pools[size]
+        shared_buffer = pool.pop()
         logger.debug("Pop shared buffer %s from pool", shared_buffer)
         return shared_buffer
 
@@ -112,16 +159,15 @@ class SharedMemoryShim(Loader):
         if any(map(lambda item: isinstance(item, np.ndarray), response)):
             self._buf_sizes = tuple(map(lambda item: item.nbytes, response))
             for item in response:
-                new_queue = queue.Queue(self._memory_pool_size)
-                for _ in range(self._memory_pool_size):
-                    new_queue.put(self._smm.SharedMemory(item.nbytes))
-                self._memory_pool[item.nbytes] = new_queue
+                self._memory_pools[item.nbytes] = MemoryPool(
+                    smm=self._smm, size=item.nbytes, count=self._memory_pool_block_count
+                )
             return self.loader.post_process(response)
         new_resp = []
         for shared in response:
             array = shared.to_ndarray()
             new_resp.append(array)
-            self._memory_pool[shared.buffer.size].put(shared.buffer)
+            self._memory_pools[shared.buffer.size].push(shared.buffer)
             logger.debug("Return shared buffer %s to pool", shared.buffer)
         return self.loader.post_process(tuple(new_resp))
 
