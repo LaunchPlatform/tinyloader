@@ -1,0 +1,15 @@
+[project]
+name = "tinyloader"
+version = "0.1.0"
+description = "A minimalist multiprocessing data loader for tinygrad"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.3.0",
+    "tinygrad>=0.10.3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.0",
+]

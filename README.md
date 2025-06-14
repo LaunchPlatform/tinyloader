@@ -1,2 +1,2 @@
 # tinyloader
-A minimalist data loader for tinygrad
+A minimalist multiprocessing data loader for tinygrad
