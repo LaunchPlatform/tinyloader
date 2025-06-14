@@ -2,6 +2,7 @@ import abc
 import collections
 import contextlib
 import dataclasses
+import functools
 import multiprocessing
 import typing
 from multiprocessing.managers import SharedMemoryManager
@@ -11,21 +12,19 @@ import numpy as np
 import tinygrad
 
 
-class DataLoader(abc.ABC):
-    @property
-    def buf_sizes(self) -> tuple[int, ...]:
-        raise NotImplementedError
-
+class Loader(abc.ABC):
     @abc.abstractmethod
     def make_request(self, item: typing.Any) -> typing.Any:
         raise NotImplementedError
 
     @abc.abstractmethod
-    def load(self, request: typing.Any) -> type[np.typing.NDArray]:
+    def load(self, request: typing.Any) -> tuple[np.typing.NDArray, ...]:
         raise NotImplementedError
 
     @abc.abstractmethod
-    def post_process(self, res):
+    def post_process(
+        self, response: tuple[np.typing.NDArray, ...]
+    ) -> tuple[tinygrad.Tensor, ...]:
         raise NotImplementedError
 
 
@@ -63,8 +62,8 @@ def share_ndarray(array: np.ndarray, buffer: SharedMemory) -> SharedNDArray:
     )
 
 
-class SharedMemoryShim(DataLoader):
-    def __init__(self, loader: DataLoader, smm: SharedMemoryManager):
+class SharedMemoryShim(Loader):
+    def __init__(self, loader: Loader, smm: SharedMemoryManager):
         self.loader = loader
         self._buf_sizes: tuple[int, ...] | None = None
         self._smm: SharedMemoryManager = smm
@@ -104,32 +103,25 @@ class SharedMemoryShim(DataLoader):
         else:
             raise ValueError(f"Unexpected load function result type {type(result)}")
 
-    def post_process(self, res):
-        pass
+    def post_process(
+        self, response: tuple[np.typing.NDArray | SharedNDArray, ...]
+    ) -> tuple[tinygrad.Tensor, ...]:
+        if any(map(functools.partial(isinstance, np.typing.NDArray), response)):
+            self._buf_sizes = tuple(map(len, response))
+            return self.loader.post_process(response)
+        new_resp = []
+        for shared in response:
+            array = shared.to_ndarray()
+            new_resp.append(array)
+            self._memory_pool[array.nbytes].append(shared.buffer)
+        return self.loader.post_process(tuple(new_resp))
 
 
 @contextlib.contextmanager
-def with_indexes(
-    loader: DataLoader, num_worker: int, indexes: typing.Sequence[int]
+def with_workers(
+    loader: Loader, num_worker: int, indexes: typing.Sequence[int]
 ) -> typing.Generator[typing.Any]:
-    pool = multiprocessing.Pool(num_worker)
-    with SharedMemoryManager() as smm:
-        memory_pool: dict[int, list[SharedMemory]] = collections.defaultdict(list)
-
-        def pop_buffer(size: int):
-            if memory_pool[size]:
-                return memory_pool[size].pop(0)
-            else:
-                return smm.SharedMemory(size)
-
-        buf_sizes = loader.buf_sizes
-        if isinstance(buf_sizes, tuple):
-            shared_buffers = tuple(map(pop_buffer, buf_sizes))
-        else:
-            raise ValueError(f"Unexpected buf_sizes type {type(buf_sizes)}")
-
-        shim = SharedMemoryShim(loader=loader)
-
+    with multiprocessing.Pool(num_worker) as pool:
         yield map(
             loader.post_process,
             pool.imap(loader.load, map(loader.make_request, indexes)),
