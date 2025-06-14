@@ -78,14 +78,18 @@ def share_ndarray(array: np.ndarray, buffer: SharedBuffer) -> SharedNDArray:
 
 class MemoryPool:
     def __init__(
-        self, smm: SharedMemoryManager, size: int, count: int, alignment_size: int = 8
+        self,
+        smm: SharedMemoryManager,
+        block_size: int,
+        block_count: int,
+        alignment_size: int = 8,
     ):
-        self.actual_block_size = size
+        self.actual_block_size = block_size
         self.block_size = max(self.actual_block_size, alignment_size)
-        self.block_count = count
+        self.block_count = block_count
         self._shared_memory = smm.SharedMemory(self.block_size * self.block_count)
-        self._queue = queue.Queue(count)
-        for i in range(count):
+        self._queue = queue.Queue(block_count)
+        for i in range(block_count):
             self._queue.put(i)
 
     def pop(self) -> SharedBuffer:
@@ -160,7 +164,9 @@ class SharedMemoryShim(Loader):
             self._buf_sizes = tuple(map(lambda item: item.nbytes, response))
             for item in response:
                 self._memory_pools[item.nbytes] = MemoryPool(
-                    smm=self._smm, size=item.nbytes, count=self._memory_pool_block_count
+                    smm=self._smm,
+                    block_size=item.nbytes,
+                    block_count=self._memory_pool_block_count,
                 )
             return self.loader.post_process(response)
         new_resp = []
