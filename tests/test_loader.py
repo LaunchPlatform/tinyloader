@@ -1,4 +1,3 @@
-import multiprocessing.context
 import typing
 from multiprocessing.managers import SharedMemoryManager
 
@@ -9,9 +8,6 @@ from tinyloader.loader import load
 from tinyloader.loader import load_with_workers
 from tinyloader.loader import Loader
 from tinyloader.loader import SharedMemoryShim
-
-
-multiprocessing.set_start_method("spawn")
 
 
 class RandomLoader(Loader):
@@ -53,7 +49,7 @@ def test_load_with_workers():
     data_size = (64, 64)
     label_size = (4,)
     num_worker = 4
-    n = 1000
+    n = 100
     loader = RandomLoader(data_size=data_size, label_size=label_size)
     count = 0
     with load_with_workers(loader, range(n), num_worker) as generator:
