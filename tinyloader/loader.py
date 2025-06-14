@@ -2,10 +2,7 @@ import abc
 import collections
 import contextlib
 import dataclasses
-import itertools
-import logging
 import multiprocessing
-import pathlib
 import typing
 from multiprocessing.managers import SharedMemoryManager
 from multiprocessing.shared_memory import SharedMemory
@@ -16,16 +13,15 @@ import tinygrad
 
 class DataLoader(abc.ABC):
     @property
-    def buf_sizes(self) -> tuple[int, ...] | dict[str, int]:
+    def buf_sizes(self) -> tuple[int, ...]:
         raise NotImplementedError
 
     @abc.abstractmethod
-    def make_request(self, index: int) -> typing.Any:
+    def make_request(self, item: typing.Any) -> typing.Any:
         raise NotImplementedError
 
-    @classmethod
     @abc.abstractmethod
-    def load(cls, request: typing.Any):
+    def load(self, request: typing.Any) -> type[np.typing.NDArray]:
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -35,7 +31,7 @@ class DataLoader(abc.ABC):
 
 @dataclasses.dataclass(frozen=True)
 class SharedNDArray:
-    shape: tuple[int]
+    shape: tuple[int, ...]
     dtype: np.typing.DTypeLike
     buffer: SharedMemory
 
@@ -45,6 +41,12 @@ class SharedNDArray:
             dtype=self.dtype,
             buffer=self.buffer.buf,
         )
+
+
+@dataclasses.dataclass(frozen=True)
+class LoadRequestSharedBuffer:
+    request: typing.Any
+    buffers: tuple[SharedMemory, ...] | None
 
 
 def share_ndarray(array: np.ndarray, buffer: SharedMemory) -> SharedNDArray:
@@ -61,29 +63,49 @@ def share_ndarray(array: np.ndarray, buffer: SharedMemory) -> SharedNDArray:
     )
 
 
-class SharedMemoryShim:
-    def __init__(
-        self,
-        loader: DataLoader,
-        shared_buffers: tuple[SharedMemory, ...] | dict[str, SharedMemory],
-    ):
+class SharedMemoryShim(DataLoader):
+    def __init__(self, loader: DataLoader, smm: SharedMemoryManager):
         self.loader = loader
-        self.shared_buffers = shared_buffers
+        self._buf_sizes: tuple[int, ...] | None = None
+        self._smm: SharedMemoryManager = smm
+        self._memory_pool: dict[int, list[SharedMemory]] = collections.defaultdict(list)
 
-    def load(self, request: typing.Any):
-        result = self.loader.load(request)
+    def _pop_buf(self, size: int) -> SharedMemory:
+        if self._memory_pool[size]:
+            return self._memory_pool[size].pop(0)
+        else:
+            return self._smm.SharedMemory(size)
+
+    def make_request(self, item: typing.Any) -> LoadRequestSharedBuffer:
+        request = self.loader.make_request(item)
+        buffers = None
+        if self._buf_sizes is not None:
+            buffers = tuple(map(self._pop_buf, self._buf_sizes))
+        return LoadRequestSharedBuffer(
+            request=request,
+            buffers=buffers,
+        )
+
+    def load(self, request: LoadRequestSharedBuffer):
+        result = self.loader.load(request.request)
+        if request.buffers is None:
+            # This is our first load, let's do it without the shared memory
+            return result
         if isinstance(result, tuple):
-            if len(result) != self.shared_buffers:
+            if len(result) != request.buffers:
                 raise ValueError(
-                    f"Expected load function result length to be {len(self.shared_buffers)} but got {len(result)} "
+                    f"Expected load function result length to be {len(request.buffers)} but got {len(result)} "
                     "instead"
                 )
             return tuple(
                 share_ndarray(array=array, buffer=shared_buffer)
-                for array, shared_buffer in zip(result, self.shared_buffers)
+                for array, shared_buffer in zip(result, request.buffers)
             )
         else:
             raise ValueError(f"Unexpected load function result type {type(result)}")
+
+    def post_process(self, res):
+        pass
 
 
 @contextlib.contextmanager
