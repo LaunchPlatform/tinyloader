@@ -1,9 +1,9 @@
 import abc
-import collections
 import contextlib
 import dataclasses
 import logging
 import multiprocessing
+import queue
 import typing
 from multiprocessing.managers import SharedMemoryManager
 from multiprocessing.shared_memory import SharedMemory
@@ -65,20 +65,17 @@ def share_ndarray(array: np.ndarray, buffer: SharedMemory) -> SharedNDArray:
 
 
 class SharedMemoryShim(Loader):
-    def __init__(self, loader: Loader, smm: SharedMemoryManager):
+    def __init__(self, loader: Loader, smm: SharedMemoryManager, memory_pool_size: int):
         self.loader = loader
         self._buf_sizes: tuple[int, ...] | None = None
         self._smm: SharedMemoryManager = smm
-        self._memory_pool: dict[int, collections.deque[SharedMemory]] = {}
+        self._memory_pool: dict[int, queue.Queue[SharedMemory]] = {}
+        self._memory_pool_size = memory_pool_size
 
     def _pop_buf(self, size: int) -> SharedMemory:
-        dequeue = self._memory_pool[size]
-        try:
-            shared_buffer = dequeue.popleft()
-            logger.debug("Pop shared buffer %s from pool", shared_buffer)
-        except IndexError:
-            shared_buffer = self._smm.SharedMemory(size)
-            logger.debug("Created shared buffer %s", shared_buffer)
+        queue = self._memory_pool[size]
+        shared_buffer = queue.get()
+        logger.debug("Pop shared buffer %s from pool", shared_buffer)
         return shared_buffer
 
     def make_request(self, item: typing.Any) -> LoadRequestSharedBuffer:
@@ -115,19 +112,22 @@ class SharedMemoryShim(Loader):
         if any(map(lambda item: isinstance(item, np.ndarray), response)):
             self._buf_sizes = tuple(map(lambda item: item.nbytes, response))
             for item in response:
-                self._memory_pool[item.nbytes] = collections.deque()
+                new_queue = queue.Queue(self._memory_pool_size)
+                for _ in range(self._memory_pool_size):
+                    new_queue.put(self._smm.SharedMemory(item.nbytes))
+                self._memory_pool[item.nbytes] = new_queue
             return self.loader.post_process(response)
         new_resp = []
         for shared in response:
             array = shared.to_ndarray()
             new_resp.append(array)
-            self._memory_pool[shared.buffer.size].append(shared.buffer)
+            self._memory_pool[shared.buffer.size].put(shared.buffer)
             logger.debug("Return shared buffer %s to pool", shared.buffer)
         return self.loader.post_process(tuple(new_resp))
 
     def __reduce__(self):
         # avoid pickling SharedMemoryManager, only care about the underlying loader in `load` method anyway
-        return self.__class__, (self.loader, None), None
+        return self.__class__, (self.loader, None, 0), None
 
 
 def load(
