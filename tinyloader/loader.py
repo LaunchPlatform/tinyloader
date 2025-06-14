@@ -173,7 +173,7 @@ class SharedMemoryShim(Loader):
         for shared in response:
             array = shared.to_ndarray()
             new_resp.append(array)
-            self._memory_pools[shared.buffer.size].push(shared.buffer)
+            self._memory_pools[shared.buffer.actual_block_size].push(shared.buffer)
             logger.debug("Return shared buffer %s to pool", shared.buffer)
         return self.loader.post_process(tuple(new_resp))
 

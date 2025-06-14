@@ -3,6 +3,7 @@ from multiprocessing.managers import SharedMemoryManager
 
 import numpy as np
 import tinygrad
+import tqdm
 
 from tinyloader.loader import load
 from tinyloader.loader import load_with_workers
@@ -63,12 +64,14 @@ def test_load_with_workers():
 def test_share_memory_shim():
     data_size = (3, 512, 512)
     label_size = (4,)
-    num_worker = 4
+    num_worker = 8
     n = 1000
     count = 0
     with SharedMemoryManager() as smm:
         loader = SharedMemoryShim(
-            RandomLoader(data_size=data_size, label_size=label_size), smm=smm
+            RandomLoader(data_size=data_size, label_size=label_size),
+            smm=smm,
+            memory_pool_block_count=num_worker,
         )
         with load_with_workers(loader, range(n), num_worker) as generator:
             for x, y in generator:
