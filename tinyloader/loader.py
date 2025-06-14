@@ -117,18 +117,20 @@ class SharedMemoryShim(Loader):
         return self.loader.post_process(tuple(new_resp))
 
 
+def load(loader: Loader, items: typing.Sequence[typing.Any]):
+    yield from map(
+        loader.post_process, map(loader.load, map(loader.make_request, items))
+    )
+
+
 @contextlib.contextmanager
-def with_workers(
-    loader: Loader, num_worker: int, indexes: typing.Sequence[int]
+def load_with_workers(
+    loader: Loader,
+    indexes: typing.Sequence[int],
+    num_worker: int | None = None,
 ) -> typing.Generator[typing.Any]:
     with multiprocessing.Pool(num_worker) as pool:
         yield map(
             loader.post_process,
             pool.imap(loader.load, map(loader.make_request, indexes)),
         )
-
-
-def load(loader: Loader, items: typing.Sequence[typing.Any]):
-    yield from map(
-        loader.post_process, map(loader.load, map(loader.make_request, items))
-    )
