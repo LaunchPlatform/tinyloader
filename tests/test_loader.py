@@ -74,7 +74,7 @@ def test_share_memory_shim():
             memory_pool_block_count=num_worker,
         )
         with load_with_workers(loader, range(n), num_worker) as generator:
-            for x, y in generator:
+            for x, y in tqdm.tqdm(generator):
                 assert x.numpy().shape == data_size
                 assert y.numpy().shape == label_size
                 count += 1
