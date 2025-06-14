@@ -2,6 +2,7 @@ import abc
 import collections
 import contextlib
 import dataclasses
+import logging
 import multiprocessing
 import typing
 from multiprocessing.managers import SharedMemoryManager
@@ -9,6 +10,8 @@ from multiprocessing.shared_memory import SharedMemory
 
 import numpy as np
 import tinygrad
+
+logger = logging.getLogger(__name__)
 
 
 class Loader(abc.ABC):
@@ -66,13 +69,18 @@ class SharedMemoryShim(Loader):
         self.loader = loader
         self._buf_sizes: tuple[int, ...] | None = None
         self._smm: SharedMemoryManager = smm
-        self._memory_pool: dict[int, list[SharedMemory]] = collections.defaultdict(list)
+        self._memory_pool: dict[int, collections.deque[SharedMemory]] = (
+            collections.defaultdict(collections.deque)
+        )
 
     def _pop_buf(self, size: int) -> SharedMemory:
         if self._memory_pool[size]:
-            return self._memory_pool[size].pop(0)
+            shared_buffer = self._memory_pool[size].popleft()
+            logger.debug("Pop shared buffer %s from pool", shared_buffer)
         else:
-            return self._smm.SharedMemory(size)
+            shared_buffer = self._smm.SharedMemory(size)
+            logger.debug("Created shared buffer %s", shared_buffer)
+        return shared_buffer
 
     def make_request(self, item: typing.Any) -> LoadRequestSharedBuffer:
         request = self.loader.make_request(item)
@@ -112,7 +120,8 @@ class SharedMemoryShim(Loader):
         for shared in response:
             array = shared.to_ndarray()
             new_resp.append(array)
-            self._memory_pool[array.nbytes].append(shared.buffer)
+            logger.debug("Return shared buffer %s to pool", shared.buffer)
+            self._memory_pool[shared.buffer.size].append(shared.buffer)
         return self.loader.post_process(tuple(new_resp))
 
     def __reduce__(self):
