@@ -11,6 +11,9 @@ from tinyloader.loader import Loader
 from tinyloader.loader import SharedMemoryShim
 
 
+multiprocessing.set_start_method("spawn")
+
+
 class RandomLoader(Loader):
     def __init__(self, data_size: tuple[int, ...], label_size: tuple[int, ...]):
         self.data_size = data_size
@@ -62,7 +65,6 @@ def test_load_with_workers():
 
 
 def test_share_memory_shim():
-    multiprocessing.context.set_spawning_popen("spawn")
     data_size = (3, 512, 512)
     label_size = (4,)
     num_worker = 4
