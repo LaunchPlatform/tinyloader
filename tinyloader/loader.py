@@ -126,3 +126,9 @@ def with_workers(
             loader.post_process,
             pool.imap(loader.load, map(loader.make_request, indexes)),
         )
+
+
+def load(loader: Loader, items: typing.Sequence[typing.Any]):
+    yield from map(
+        loader.post_process, map(loader.load, map(loader.make_request, items))
+    )
