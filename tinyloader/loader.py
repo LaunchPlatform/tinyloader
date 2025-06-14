@@ -92,7 +92,7 @@ class SharedMemoryShim(Loader):
             # This is our first load, let's do it without the shared memory
             return result
         if isinstance(result, tuple):
-            if len(result) != request.buffers:
+            if len(result) != len(request.buffers):
                 raise ValueError(
                     f"Expected load function result length to be {len(request.buffers)} but got {len(result)} "
                     "instead"
@@ -108,7 +108,7 @@ class SharedMemoryShim(Loader):
         self, response: tuple[np.typing.NDArray | SharedNDArray, ...]
     ) -> tuple[tinygrad.Tensor, ...]:
         if any(map(lambda item: isinstance(item, np.ndarray), response)):
-            self._buf_sizes = tuple(map(len, response))
+            self._buf_sizes = tuple(map(lambda item: item.nbytes, response))
             return self.loader.post_process(response)
         new_resp = []
         for shared in response:
