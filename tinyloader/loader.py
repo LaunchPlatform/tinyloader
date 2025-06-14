@@ -106,7 +106,7 @@ class SharedMemoryShim(Loader):
     def post_process(
         self, response: tuple[np.typing.NDArray | SharedNDArray, ...]
     ) -> tuple[tinygrad.Tensor, ...]:
-        if any(map(functools.partial(isinstance, np.typing.NDArray), response)):
+        if any(map(lambda item: isinstance(item, np.ndarray), response)):
             self._buf_sizes = tuple(map(len, response))
             return self.loader.post_process(response)
         new_resp = []
@@ -115,6 +115,9 @@ class SharedMemoryShim(Loader):
             new_resp.append(array)
             self._memory_pool[array.nbytes].append(shared.buffer)
         return self.loader.post_process(tuple(new_resp))
+
+    def __reduce__(self):
+        return self.__class__, (self.loader, None), None
 
 
 def load(loader: Loader, items: typing.Sequence[typing.Any]):
