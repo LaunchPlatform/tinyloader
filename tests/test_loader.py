@@ -63,7 +63,7 @@ def test_load_with_workers():
 
 def test_share_memory_shim():
     multiprocessing.context.set_spawning_popen("spawn")
-    data_size = (9, 3, 512, 512)
+    data_size = (3, 512, 512)
     label_size = (4,)
     num_worker = 4
     n = 1000
