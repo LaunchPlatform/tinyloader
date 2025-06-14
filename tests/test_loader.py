@@ -45,6 +45,6 @@ def test_load_with_workers():
 def test_share_memory_shim():
     with SharedMemoryManager() as smm:
         loader = SharedMemoryShim(NormalLoader(), smm=smm)
-        with load_with_workers(loader, range(10), 4) as generator:
+        with load_with_workers(loader, range(100), 4) as generator:
             for x, y in generator:
                 print(x.numpy(), y.numpy())

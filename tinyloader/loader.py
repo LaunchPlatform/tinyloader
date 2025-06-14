@@ -3,6 +3,7 @@ import collections
 import contextlib
 import dataclasses
 import functools
+import itertools
 import multiprocessing
 import typing
 from multiprocessing.managers import SharedMemoryManager
@@ -129,11 +130,19 @@ def load(loader: Loader, items: typing.Sequence[typing.Any]):
 @contextlib.contextmanager
 def load_with_workers(
     loader: Loader,
-    indexes: typing.Sequence[int],
+    items: typing.Sequence[typing.Any],
     num_worker: int | None = None,
 ) -> typing.Generator[typing.Any]:
     with multiprocessing.Pool(num_worker) as pool:
-        yield map(
-            loader.post_process,
-            pool.imap(loader.load, map(loader.make_request, indexes)),
-        )
+        items_iter = iter(items)
+
+        def generate():
+            # Load first item without multiprocessing to get the buffer size in case the shared memory loader is
+            # used
+            yield from load(loader, [next(items_iter)])
+            yield from map(
+                loader.post_process,
+                pool.imap(loader.load, map(loader.make_request, items_iter)),
+            )
+
+        yield generate()
