@@ -14,3 +14,7 @@ dev = [
     "pytest>=8.4.0",
     "tqdm>=4.67.1",
 ]
+[project.urls]
+Homepage = "https://github.com/LaunchPlatform/tinyloader"
+Repository = "https://github.com/LaunchPlatform/tinyloader.git"
+
