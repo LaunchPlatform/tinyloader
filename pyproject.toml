@@ -1,6 +1,6 @@
 [project]
 name = "tinyloader"
-version = "0.1.0"
+version = "0.1.1"
 description = "A minimalist multiprocessing data loader for tinygrad"
 readme = "README.md"
 requires-python = ">=3.11"
