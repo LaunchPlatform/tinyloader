@@ -101,3 +101,22 @@ with SharedMemoryManager() as smm:
             pass
 
 ```
+
+Since this is a very common pattern for loading huge amount of data from the background workers, we provided the `shared_memory_enabled` argument for enabling this.
+With it, you can write the following instead.
+
+
+```python
+from tinyloader.loader import load_with_workers
+
+num_workers = 8
+
+with load_with_workers(VideoLoader(), ["0.mp4", "1.mp4", ...], num_workers, shared_memory_enabled=True) as generator:
+    for x, y in generator:
+        # ... use x and y for training or testing
+        pass
+
+```
+
+You can also pass in `memory_pool_block_count` if you want.
+But in most case, the default value using the same value of `num_workers` is good enough.
