@@ -48,9 +48,9 @@ class VideoLoader(Loader):
         # method into a tinygrad Tensor. Be careful that the underlying memory buffer for the passed in
         # response could be shared memory, and it will be reused by other worker after this function
         # returns, so you need to copy the data before return
-        return tinygrad.Tensor(x).contiguous().realize(), tinygrad.Tensor(
-            y
-        ).contiguous().realize()
+        x = tinygrad.Tensor(x).contiguous().realize()
+        y = tinygrad.Tensor(y).contiguous().realize()
+        return x, y
 
 ```
 
