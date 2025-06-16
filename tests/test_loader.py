@@ -79,3 +79,20 @@ def test_share_memory_shim():
                 assert y.numpy().shape == label_size
                 count += 1
     assert count == n
+
+
+def test_share_memory_enabled():
+    data_size = (3, 512, 512)
+    label_size = (4,)
+    num_worker = 8
+    n = 1000
+    count = 0
+    loader = RandomLoader(data_size=data_size, label_size=label_size)
+    with load_with_workers(
+        loader, range(n), num_worker, shared_memory_enabled=True
+    ) as generator:
+        for x, y in tqdm.tqdm(generator):
+            assert x.numpy().shape == data_size
+            assert y.numpy().shape == label_size
+            count += 1
+    assert count == n

@@ -185,6 +185,12 @@ class SharedMemoryShim(Loader):
 def load(
     loader: Loader, items: typing.Sequence[typing.Any]
 ) -> typing.Generator[tuple[tinygrad.Tensor, ...], None, None]:
+    """Load data immediately in current process/thread
+
+    :param loader: the `Loader` to load data from
+    :param items: sequence or generator providing items for loader to load
+    :return: A generator for yielding loaded data
+    """
     yield from map(
         loader.post_process, map(loader.load, map(loader.make_request, items))
     )
@@ -195,19 +201,47 @@ def load_with_workers(
     loader: Loader,
     items: typing.Sequence[typing.Any],
     num_worker: int | None = None,
+    shared_memory_enabled: bool = False,
+    memory_pool_block_count: int | None = None,
 ) -> typing.Generator[
     typing.Generator[tuple[tinygrad.Tensor, ...], None, None], None, None
 ]:
-    with multiprocessing.Pool(num_worker) as pool:
+    """
+    Load data with background workers
+
+    :param loader: The `Loader` to load data from
+    :param items: sequence or generator providing items for loader to load
+    :param num_worker: number of workers to run in the background
+    :param shared_memory_enabled: should we load data into shared memory to speed it up or not
+    :param memory_pool_block_count: count of memory blocks for shared memory pool, if None is provided, num_worker
+                                    will be used
+    :return: A generator for yielding loaded data
+    """
+    shared_memory_ctx = contextlib.nullcontext()
+    if shared_memory_enabled:
+        shared_memory_ctx = SharedMemoryManager()
+    with shared_memory_ctx as smm, multiprocessing.Pool(num_worker) as pool:
         items_iter = iter(items)
+
+        actual_loader = loader
+        if shared_memory_enabled:
+            actual_loader = SharedMemoryShim(
+                loader=loader,
+                smm=smm,
+                memory_pool_block_count=memory_pool_block_count
+                if memory_pool_block_count is not None
+                else num_worker,
+            )
 
         def generate() -> typing.Generator[tuple[tinygrad.Tensor, ...], None, None]:
             # Load first item without multiprocessing to get the buffer size in case the shared memory loader is
             # used
-            yield from load(loader, [next(items_iter)])
+            yield from load(actual_loader, [next(items_iter)])
             yield from map(
-                loader.post_process,
-                pool.imap(loader.load, map(loader.make_request, items_iter)),
+                actual_loader.post_process,
+                pool.imap(
+                    actual_loader.load, map(actual_loader.make_request, items_iter)
+                ),
             )
 
         yield generate()
