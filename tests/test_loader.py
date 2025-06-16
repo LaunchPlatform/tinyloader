@@ -2,6 +2,7 @@ import typing
 from multiprocessing.managers import SharedMemoryManager
 
 import numpy as np
+import pytest
 import tinygrad
 import tqdm
 
@@ -96,3 +97,22 @@ def test_share_memory_enabled():
             assert y.numpy().shape == label_size
             count += 1
     assert count == n
+
+
+@pytest.mark.timeout(10)
+def test_generator_early_stops_queue_not_shutdown():
+    data_size = (5,)
+    label_size = (4,)
+    num_worker = 4
+
+    def forever_gen():
+        while True:
+            yield 1
+
+    loader = RandomLoader(data_size=data_size, label_size=label_size)
+    with load_with_workers(
+        loader, forever_gen(), num_worker, shared_memory_enabled=True
+    ) as generator:
+        for i, _ in enumerate(tqdm.tqdm(generator)):
+            if i > 10:
+                break

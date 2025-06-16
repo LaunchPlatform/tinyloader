@@ -17,17 +17,40 @@ logger = logging.getLogger(__name__)
 class Loader(abc.ABC):
     @abc.abstractmethod
     def make_request(self, item: typing.Any) -> typing.Any:
+        """Called to make data loading request to potentially passing to the workers. Ideally the return value should
+        be easily pickable otherwise it might be very slow.
+
+        :param item: The item to generate the loading request for
+        :return: a pickable value for the worker process or the current process to load
+        """
         raise NotImplementedError
 
     @abc.abstractmethod
     def load(self, request: typing.Any) -> tuple[np.typing.NDArray, ...]:
+        """Called to load data for the given item. Potentially called from a worker process.
+
+        :param request: Request for loading the data
+        :return: The loaded data, should be a tuple of numpy's ndarray
+        """
         raise NotImplementedError
 
     @abc.abstractmethod
     def post_process(
         self, response: tuple[np.typing.NDArray, ...]
     ) -> tuple[tinygrad.Tensor, ...]:
+        """Called to convert numpy's ndarray returned from the `load` method into tinygrad's Tensor for training or
+        testing purpose. This method will be called from the process which invokes the loading generator.
+
+        :param response: Response ndarray values returned by the `load` method
+        :return: A tuple of tinygrad Tensor for training / testing or other purpose
+        """
         raise NotImplementedError
+
+    def shutdown(self):
+        """Called to shutdown resources associated with the loader. Like, abort async operations or release files and
+        etc.
+
+        """
 
 
 @dataclasses.dataclass(frozen=True)
@@ -112,6 +135,9 @@ class MemoryPool:
         self._queue.put(shared_buffer.index)
         logger.debug("Pushed shared buffer %s", shared_buffer)
 
+    def shutdown(self):
+        self._queue.shutdown(immediate=True)
+
 
 class SharedMemoryShim(Loader):
     def __init__(
@@ -181,6 +207,10 @@ class SharedMemoryShim(Loader):
         # avoid pickling SharedMemoryManager, only care about the underlying loader in `load` method anyway
         return self.__class__, (self.loader, None, 0), None
 
+    def shutdown(self):
+        for mem_pool in self._memory_pools.values():
+            mem_pool.shutdown()
+
 
 def load(
     loader: Loader, items: typing.Sequence[typing.Any]
@@ -244,4 +274,7 @@ def load_with_workers(
                 ),
             )
 
-        yield generate()
+        try:
+            yield generate()
+        finally:
+            actual_loader.shutdown()
