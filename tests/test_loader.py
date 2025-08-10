@@ -25,13 +25,18 @@ class RandomLoader(Loader):
             request, 1.0, size=self.label_size
         )
 
+
+class ScalarLoader(Loader):
+    def make_request(self, item: int) -> typing.Any:
+        return item
+
+    def load(self, request: int) -> tuple[np.typing.NDArray, ...]:
+        return (np.array(request),)
+
     def post_process(
         self, response: tuple[np.typing.NDArray, ...]
     ) -> tuple[tinygrad.Tensor, ...]:
-        x, y = response
-        return tinygrad.Tensor(x).contiguous().realize(), tinygrad.Tensor(
-            y
-        ).contiguous().realize()
+        return (tinygrad.Tensor(response).contiguous().realize(),)
 
 
 def test_load():
@@ -82,7 +87,7 @@ def test_share_memory_shim():
     assert count == n
 
 
-def test_share_memory_enabled():
+def test_shared_memory_enabled():
     data_size = (3, 512, 512)
     label_size = (4,)
     num_worker = 8
@@ -95,6 +100,20 @@ def test_share_memory_enabled():
         for x, y in tqdm.tqdm(generator):
             assert x.numpy().shape == data_size
             assert y.numpy().shape == label_size
+            count += 1
+    assert count == n
+
+
+def test_shared_memory_with_scalar():
+    num_worker = 8
+    n = 1000
+    count = 0
+    loader = ScalarLoader()
+    with load_with_workers(
+        loader, range(n), num_worker, shared_memory_enabled=True
+    ) as generator:
+        for y, (x,) in enumerate(tqdm.tqdm(generator)):
+            assert x.item() == y
             count += 1
     assert count == n
 
