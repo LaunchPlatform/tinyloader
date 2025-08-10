@@ -92,7 +92,10 @@ def share_ndarray(array: np.ndarray, buffer: SharedBuffer) -> SharedNDArray:
             f"Expected data ndarray size {array.nbytes} should be equal to {buffer.actual_block_size}"
         )
     shared_ndarray = np.ndarray(shape=array.shape, dtype=array.dtype, buffer=buffer.buf)
-    shared_ndarray[:] = array[:]
+    if np.isscalar(array) or array.ndim == 0:
+        shared_ndarray[()] = array
+    else:
+        shared_ndarray[:] = array[:]
     return SharedNDArray(
         shape=shared_ndarray.shape,
         dtype=shared_ndarray.dtype,
