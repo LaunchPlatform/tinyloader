@@ -4,6 +4,7 @@ import dataclasses
 import logging
 import multiprocessing
 import queue
+import signal
 import typing
 from multiprocessing.managers import SharedMemoryManager
 from multiprocessing.shared_memory import SharedMemory
@@ -226,6 +227,11 @@ def load(
     )
 
 
+# ref: https://stackoverflow.com/a/6191991
+def init_worker():
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+
 @contextlib.contextmanager
 def load_with_workers(
     loader: Loader,
@@ -250,7 +256,10 @@ def load_with_workers(
     shared_memory_ctx = contextlib.nullcontext()
     if shared_memory_enabled:
         shared_memory_ctx = SharedMemoryManager()
-    with shared_memory_ctx as smm, multiprocessing.Pool(num_worker) as pool:
+    with (
+        shared_memory_ctx as smm,
+        multiprocessing.Pool(num_worker, init_worker) as pool,
+    ):
         items_iter = iter(items)
 
         actual_loader = loader
@@ -276,5 +285,12 @@ def load_with_workers(
 
         try:
             yield generate()
+        except KeyboardInterrupt:
+            actual_loader.shutdown()
+            pool.terminate()
+            pool.join()
+            raise
         finally:
             actual_loader.shutdown()
+            pool.close()
+            pool.join()
